@@ -1,9 +1,15 @@
 const glados = async () => {
   const notice = []
-  if (!process.env.GLADOS) return
+  if (!process.env.GLADOS || !process.env.GLADOS.trim()) {
+    process.exitCode = 1
+    return ['Checkin Error', 'Missing GLADOS secret']
+  }
   // GLaDOS 签到会校验 UA 是否与登录时的浏览器一致, 多帐号时按行与 GLADOS 一一对应
-  const agents = String(process.env.GLADOS_UA || '').split('\n').filter(Boolean)
-  const cookies = String(process.env.GLADOS).split('\n').filter(Boolean)
+  const agents = String(process.env.GLADOS_UA || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const cookies = String(process.env.GLADOS).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  if (!agents.length) {
+    console.warn('GLADOS_UA is missing; set it to the User-Agent of the browser used to log in to GLaDOS. The fallback UA may be rejected.')
+  }
   for (const [index, cookie] of cookies.entries()) {
     try {
       const domain = process.env.DOMAIN || 'glados.cloud'
@@ -29,6 +35,7 @@ const glados = async () => {
         `Left Days ${Number(status?.data?.leftDays)}`
       )
     } catch (error) {
+      process.exitCode = 1
       notice.push(
         'Checkin Error',
         `${error}`,
@@ -45,9 +52,8 @@ const notify = async (notice) => {
     if (!option) continue
     try {
       if (option.startsWith('console:')) {
-        for (const line of notice) {
-          console.log(line)
-        }
+        // Results are always printed by main, even without a NOTIFY secret.
+        continue
       } else if (option.startsWith('wxpusher:')) {
         await fetch(`https://wxpusher.zjiecode.com/api/send/message`, {
           method: 'POST',
@@ -113,7 +119,14 @@ const notify = async (notice) => {
 }
 
 const main = async () => {
-  await notify(await glados())
+  const notice = await glados()
+  for (const line of notice || []) {
+    console.log(line)
+  }
+  await notify(notice)
 }
 
-main()
+main().catch((error) => {
+  console.error('Checkin Error', String(error))
+  process.exitCode = 1
+})
